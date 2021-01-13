@@ -23,7 +23,7 @@ class MusicConverter:
         real = pp.Combine(
             pp.Word(pp.nums) + pp.Optional(pp.Char(',.') + pp.Word(pp.nums))
         ).setParseAction(lambda t: float(t[0].replace(',', '.')))
-        integer = (pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)).setParseAction(lambda t: float(t[0] + t[1]))
+        integer = (pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)).setParseAction(lambda t: int(t[0] + t[1]) if len(t) > 1 else int(t[0]))
 
         must_operator = pp.Char('+-').setParseAction(lambda t: float(t[0] + '1'))
         may_operator = pp.Optional(pp.Char('+-')).setParseAction(lambda t: float(t[0] + '1' if len(t) > 0 else '1'))
@@ -70,14 +70,27 @@ class MusicConverter:
                 real + 'Hz'
         ).setParseAction(lambda t: self.base_freq * (self.__root__ ** t[0])).setResultsName('note_value')
 
-        def score_parse_action(token):
-            pos, acc = token
-            return acc, pos
+        # TODO: score_parse_action must return a note_value
+        def score_parse_action(tokens):
+            position = tokens[0]
+            if len(tokens) > 1:
+                accidentals = tokens[1]
+            else:
+                accidentals = '_'
+            return pp.ParseResults([position, accidentals])
 
         self.score_parser = (
-                integer + no_whites +
-                pp.Literal(':').suppress() + no_whites +
-                pp.Word('_nb#', max=2, min=1)
+            integer + pp.Literal(':').suppress() +
+            (
+                pp.Keyword('_') |
+                pp.Keyword('#') |
+                pp.Keyword('b') |
+                pp.Keyword('##') |
+                pp.Keyword('bb') |
+                pp.Keyword('n#') |
+                pp.Keyword('nb')
+            ) |
+            integer + pp.LineEnd()
         ).setParseAction(score_parse_action).setResultsName('note_value')
 
         self.note_value_parser = self.note_parser ^ self.hertz_parser
@@ -282,7 +295,7 @@ class MusicConverter:
                     index -= 1
                     amendment = '#'
 
-        return f'{names[index]}{amendment}{self.octave}'
+        return f'{self.__names__[index]}{amendment}{self.octave}'
 
     @property
     def scales(self):
@@ -363,16 +376,17 @@ class MusicConverter:
 
 
 if __name__ == '__main__':
+    from sys import stderr
     converter = MusicConverter()
 
-    converter.note_value = 1
-
-    piano = "U'U'UU'U'U'U"
-    octaves = ''.join(str(i) * 12 for i in range(9))
-    names = 'C D EF G A B'
-
+    # converter.note_value = 1
+    #
+    # piano = "U'U'UU'U'U'U"
+    # octaves = ''.join(str(i) * 12 for i in range(9))
+    # names = 'C D EF G A B'
+    #
     # scale = 'C/a'
-    scale = 'F/d'
+    # scale = 'F/d'
     # scale = 'Bb/g'
     # scale = 'Eb/c'
     # scale = 'Ab/f'
@@ -386,22 +400,28 @@ if __name__ == '__main__':
     # scale = 'A/f#'
     # scale = 'D/b'
     # scale = 'G/e'
+    #
+    # converter.scale = scale
+    # converter.clef = 'violin'
+    # used = converter.scales[scale][1]
+    # index = 57 + int(round(converter.note_value))
+    # key = ' ' * index + 'I' + ' ' * (107 - index)
+    #
+    # print(f'scale: {converter.scale}')
+    # print(f'clef: {converter.clef}')
+    # print()
+    # print(octaves[9:-11])
+    # print((names * 9)[9:-11])
+    # print((piano * 9)[9:-11])
+    # print((used * 9)[9:-11])
+    # print(key[9:-11])
+    # print()
+    # print(f'value: {converter.note_value}')
+    # print(f'name: {converter.scale_name}')
+    # print(f'score: {converter.score}')
 
-    converter.scale = scale
-    converter.clef = 'violin'
-    used = converter.scales[scale][1]
-    index = 57 + int(round(converter.note_value))
-    key = ' ' * index + 'I' + ' ' * (107 - index)
-
-    print(f'scale: {converter.scale}')
-    print(f'clef: {converter.clef}')
-    print()
-    print(octaves[9:-11])
-    print((names * 9)[9:-11])
-    print((piano * 9)[9:-11])
-    print((used * 9)[9:-11])
-    print(key[9:-11])
-    print()
-    print(f'value: {converter.note_value}')
-    print(f'name: {converter.scale_name}')
-    print(f'score: {converter.score}')
+    input = '-7'
+    try:
+        print(f'tokens: {converter.score_parser.parseString(input)}')
+    except pp.ParseException as e:
+        print(f'Could not parse "{input}" @ col {e.col}!', file=stderr)

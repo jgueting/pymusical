@@ -23,6 +23,7 @@ class MusicConverter:
         real = pp.Combine(
             pp.Word(pp.nums) + pp.Optional(pp.Char(',.') + pp.Word(pp.nums))
         ).setParseAction(lambda t: float(t[0].replace(',', '.')))
+        integer = (pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)).setParseAction(lambda t: float(t[0] + t[1]))
 
         must_operator = pp.Char('+-').setParseAction(lambda t: float(t[0] + '1'))
         may_operator = pp.Optional(pp.Char('+-')).setParseAction(lambda t: float(t[0] + '1' if len(t) > 0 else '1'))
@@ -69,8 +70,15 @@ class MusicConverter:
                 real + 'Hz'
         ).setParseAction(lambda t: self.base_freq * (self.__root__ ** t[0])).setResultsName('note_value')
 
-        # ToDo: score_parser
-        # self.score_parser =
+        def score_parse_action(token):
+            pos, acc = token
+            return acc, pos
+
+        self.score_parser = (
+                integer + no_whites +
+                pp.Literal(':').suppress() + no_whites +
+                pp.Word('_nb#', max=2, min=1)
+        ).setParseAction(score_parse_action).setResultsName('note_value')
 
         self.note_value_parser = self.note_parser ^ self.hertz_parser
 
@@ -91,7 +99,9 @@ class MusicConverter:
         self.base_freq = base_freq
 
         self.scale = scale
+        self.__names__ = 'C D EF G A B'
         self.clef = clef
+        self.__clef__ = 'violin'
 
         self.max_gain = max_gain
         self.min_gain = min_gain
@@ -254,77 +264,67 @@ class MusicConverter:
 
     @property
     def scale_name(self):
-        return self.scales[self.scale][1][int(self.note_value - 3) % 12]
+        used = self.scales[self.scale][1]
+        amendment = ''
+        index = int((round(self.note_value) + 9) % 12)
+        if used[index] == 'b':
+            index += 1
+            amendment = 'b'
+        elif used[index] == '#':
+            index -= 1
+            amendment = '#'
+        else:
+            if self.__names__[index] == ' ':
+                if 'b' in used:
+                    index += 1
+                    amendment = 'b'
+                else:
+                    index -= 1
+                    amendment = '#'
+
+        return f'{names[index]}{amendment}{self.octave}'
 
     @property
     def scales(self):
         scales = {
-            'C/a': (0,
-                    ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                    ['_', '#', '_', '#', '_', '_', '#', '_', '#', '_', '#', '_'],
-                    '#'),
-            'F/d': (1,
-                    ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'],
-                    ['_', 'b', '_', 'b', '_', '_', 'b', '_', 'b', '_', '_', 'n'],
-                    'b'),
-            'Bb/g': (2,
-                     ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'],
-                     ['_', 'b', '_', '_', 'n', '_', 'b', '_', 'b', '_', '_', 'n'],
-                     'b'),
-            'Eb/c': (3,
-                     ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'],
-                     ['_', 'b', '_', '_', 'n', '_', 'b', '_', '_', 'n', '_', 'n'],
-                     'b'),
-            'Ab/f': (4,
-                     ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'],
-                     ['_', '_', 'n', '_', 'n', '_', 'b', '_', '_', 'n', '_', 'n'],
-                     'b'),
-            'Db/bb': (5,
-                      ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'],
-                      ['_', '_', 'n', '_', 'n', '_', '_', 'n', '_', 'n', '_', 'n'],
-                      'b'),
-            'C#/a#': (5,
-                      ['B#', 'C#', 'D', 'D#', 'E', 'E#', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                      ['_', '_', 'n', '_', 'n', '_', '_', 'n', '_', 'n', '_', 'n'],
-                      '#'),
-            'F#/d#': (6,
-                      ['C', 'C#', 'D', 'D#', 'E', 'E#', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                      ['n', '_', 'n', '_', 'n', '_', '_', 'n', '_', 'n', '_', '_'],
-                      '#'),
-            'Gb/eb': (6,
-                      ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'Cb'],
-                      ['n', '_', 'n', '_', 'n', '_', '_', 'n', '_', 'n', '_', '_'],
-                      'b'),
-            'B/g#': (7,
-                     ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                     ['n', '_', 'n', '_', '_', 'n', '_', 'n', '_', 'n', '_', '_'],
-                     '#'),
-            'Cb/ab': (7,
-                      ['C', 'Db', 'D', 'Eb', 'Fb', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'Cb'],
-                      ['n', '_', 'n', '_', '_', 'n', '_', 'n', '_', 'n', '_', '_'],
-                      'b'),
-            'E/c#': (8,
-                     ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                     ['n', '_', 'n', '_', '_', 'n', '_', 'n', '_', '_', '#', '_'],
-                     '#'),
-            'A/f#': (9,
-                     ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                     ['n', '_', '_', '#', '_', 'n', '_', 'n', '_', '_', '#', '_'],
-                     '#'),
-            'D/b': (10,
-                    ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                    ['n', '_', '_', '#', '_', 'n', '_', '_', '#', '_', '#', '_'],
-                    '#'),
-            'G/e': (11,
-                    ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
-                    ['_', '#', '_', '#', '_', 'n', '_', '_', '#', '_', '#', '_'],
-                    '#')
+            'C/a'  : ( 0, '_ _ __ _ _ _'),
+            'F/d'  : ( 1, '_ _ __ _ _b '),
+            'Bb/g' : ( 2, '_ _b _ _ _b '),
+            'Eb/c' : ( 3, '_ _b _ _b b '),
+            'Ab/f' : ( 4, '_b b _ _b b '),
+            'Db/bb': ( 5, '_b b _b b b '),
+            'C#/a#': ( 5, '## # ## # # '),
+            'F#/d#': ( 6, ' # # ## # #_'),
+            'Gb/eb': ( 6, ' b b _b b bb'),
+            'B/g#' : ( 7, ' # #_ # # #_'),
+            'Cb/ab': ( 7, ' b bb b b bb'),
+            'E/c#' : ( 8, ' # #_ # #_ _'),
+            'A/f#' : ( 9, ' #_ _ # #_ _'),
+            'D/b'  : (10, ' #_ _ #_ _ _'),
+            'G/e'  : (11, '_ _ _ #_ _ _')
         }
         return scales
 
     @property
     def score(self):
-        return f'{self.score_pos}:{self.score_acc}'
+        used = self.scales[self.scale][1]
+
+        index = int((round(self.note_value) + 9) % 12)
+
+        position = (self.octave - 4) * 7 + self.clefs[self.clef]
+        for i in range(index):
+            if not used[i] == ' ':
+                position += 1
+
+        accidental = '_'
+        tendency = 'b' if 'b' in used else '#'
+        if used[index] == ' ':
+            position -= 1
+            if self.__names__[index] == ' ':
+                accidental = tendency
+            else:
+                accidental = 'n'
+        return position, accidental
 
     @score.setter
     def score(self, new_score):
@@ -337,9 +337,71 @@ class MusicConverter:
             raise TypeError('MusicConverter.score only accepts <str>')
 
     @property
-    def score_pos(self):
-        return 0
+    def clefs(self):
+        clefs = {
+            'violin': -6,
+            'alto': 0,
+            'bass': +6
+        }
+        return clefs
 
     @property
-    def score_acc(self):
-        return '_'
+    def clef(self):
+        return self.__clef__
+
+    @clef.setter
+    def clef(self, new_clef):
+        if isinstance(new_clef, str):
+            if new_clef in self.clefs:
+                self.__clef__ = new_clef
+            else:
+                raise MusicConverterError(f'no clef with name "{new_clef}" available!')
+        else:
+            raise TypeError('MusicConverter.clef only accepts <str>')
+
+
+
+
+if __name__ == '__main__':
+    converter = MusicConverter()
+
+    converter.note_value = 1
+
+    piano = "U'U'UU'U'U'U"
+    octaves = ''.join(str(i) * 12 for i in range(9))
+    names = 'C D EF G A B'
+
+    # scale = 'C/a'
+    scale = 'F/d'
+    # scale = 'Bb/g'
+    # scale = 'Eb/c'
+    # scale = 'Ab/f'
+    # scale = 'Db/bb'
+    # scale = 'C#/a#'
+    # scale = 'F#/d#'
+    # scale = 'Gb/eb'
+    # scale = 'B/g#'
+    # scale = 'Cb/ab'
+    # scale = 'E/c#'
+    # scale = 'A/f#'
+    # scale = 'D/b'
+    # scale = 'G/e'
+
+    converter.scale = scale
+    converter.clef = 'violin'
+    used = converter.scales[scale][1]
+    index = 57 + int(round(converter.note_value))
+    key = ' ' * index + 'I' + ' ' * (107 - index)
+
+    print(f'scale: {converter.scale}')
+    print(f'clef: {converter.clef}')
+    print()
+    print(octaves[9:-11])
+    print((names * 9)[9:-11])
+    print((piano * 9)[9:-11])
+    print((used * 9)[9:-11])
+    print(key[9:-11])
+    print()
+    print(f'value: {converter.note_value}')
+    print(f'name: {converter.scale_name}')
+    print(f'score: {converter.score}')

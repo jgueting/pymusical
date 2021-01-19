@@ -1,1 +1,5 @@
 /venv_win/
+/pymusical.egg-info/
+/dist/
+/build/
+/.idea/

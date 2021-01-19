@@ -12,24 +12,34 @@ class MusicConverter:
                  amplitude=.5,
                  max_gain=10.,
                  min_gain=-200.,
-                 scale='C/a',
+                 new_scale='C/a',
                  clef='violin'):
 
-        self.__root__ = 2 ** (1 / 12)
+        # an important constant value for the conversion of musical halt tone steps to frequency values
+        # is the twelfth root of 2
+        self.__root__ = 1.0594630943592952645618252949463  # (2 ** (1 / 12))
 
         # *** parser definitions ***
+        # helper
         no_whites = pp.NotAny(pp.White())
 
+        # numbers
         real = pp.Combine(
             pp.Word(pp.nums) + pp.Optional(pp.Char(',.') + pp.Word(pp.nums))
         ).setParseAction(lambda t: float(t[0].replace(',', '.')))
-        integer = (pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)).setParseAction(lambda t: int(t[0] + t[1]) if len(t) > 1 else int(t[0]))
+        integer = (
+                pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)
+        ).setParseAction(lambda t: int(t[0] + t[1]) if len(t) > 1 else int(t[0]))
 
-        must_operator = pp.Char('+-').setParseAction(lambda t: float(t[0] + '1'))
-        may_operator = pp.Optional(pp.Char('+-')).setParseAction(lambda t: float(t[0] + '1' if len(t) > 0 else '1'))
+        # signs
+        must_sign = pp.Char('+-').setParseAction(lambda t: float(t[0] + '1'))
+        may_sign = pp.Optional(pp.Char('+-')).setParseAction(lambda t: float(t[0] + '1' if len(t) > 0 else '1'))
 
-        cent = (must_operator + no_whites + real + pp.StringEnd()).setParseAction(lambda t: t[0] * t[1] / 100)
+        # cent: 100th part of a musical half tone step, sign required.
+        # usually between -50 and +50, returns a number between -.5 and .5
+        cent = (must_sign + no_whites + real + pp.StringEnd()).setParseAction(lambda t: t[0] * t[1] / 100)
 
+        # helpers for the note parser
         note_name_offset = {
             'C': -9,
             'D': -7,
@@ -49,6 +59,8 @@ class MusicConverter:
                      + no_whites + pp.FollowedBy(octave) + octave
                      ).setParseAction(lambda t: sum(t))
 
+        # parse action for the note parser. checks if eg. "D#/Eb" contains the same note value twice and
+        # returns the note value
         def note_parser_action(t):
             if len(t) > 1:
                 if isinstance(t[1], int):
@@ -57,6 +69,7 @@ class MusicConverter:
                     t.pop(1)
             return sum(t)
 
+        # parses a string like "A#4 +30" into a musical half tone step + cents
         self.note_parser = (
                 pp.Optional(full_note +
                             (pp.FollowedBy(no_whites + '/') +
@@ -66,20 +79,21 @@ class MusicConverter:
                 full_note + (pp.StringEnd() ^ cent)
         ).setParseAction(note_parser_action).setResultsName('note_value')
 
+        # parses a string like "440Hz" into a frequency value
         self.hertz_parser = (
                 real + 'Hz'
-        ).setParseAction(lambda t: self.base_freq * (self.__root__ ** t[0])).setResultsName('note_value')
+        ).setParseAction(lambda t: t[0]).setResultsName('frequency')
 
+        # parse action for score parser
         def score_parse_action(tokens):
             position = tokens[0]
 
             position -= self.clefs[self.clef]
             octave_offset = position // 7
             position = position % 7
-            used = [-9 + i for i in range(12) if not converter.scales[converter.scale][1][i] == ' ']
+            used_values = [-9 + i for i in range(12) if not converter.keys[converter.key][1][i] == ' ']
 
             if len(tokens) > 1:
-                print(tokens)
                 if tokens[1] == 'b':
                     accidental_offset = -1
                 elif tokens[1] == '#':
@@ -89,11 +103,8 @@ class MusicConverter:
                 elif tokens[1] == 'bb':
                     accidental_offset = -2
                 elif tokens[1] in ['n', 'n#', 'nb']:
-                    print(f'used: {self.scales[self.scale][1]}')
-                    print(f'position: {position}')
-                    vorzeichen = self.scales[self.scale][1].replace(' ','')[position]
-                    print(f'vorzeichen: {vorzeichen}')
-                    if not vorzeichen in '#b':
+                    vorzeichen = self.keys[self.key][1].replace(' ', '')[position]
+                    if vorzeichen not in '#b':
                         raise MusicConverterError('natural sign not applicable!')
                     else:
                         if vorzeichen == 'b':
@@ -115,10 +126,9 @@ class MusicConverter:
             else:
                 accidental_offset = 0
 
-            print(f'accidental_offset: {accidental_offset}')
+            return octave_offset * 12 + used_values[position] + accidental_offset
 
-            return octave_offset * 12 + used[position] + accidental_offset
-
+        # parses a string like "sc -3:#" into a note value (musical half tone step)
         self.score_parser = (
             pp.Keyword('sc').suppress() + integer + pp.Literal(':').suppress() +
             (
@@ -134,25 +144,33 @@ class MusicConverter:
             pp.Keyword('sc').suppress() + integer + pp.LineEnd()
         ).setParseAction(score_parse_action).setResultsName('note_value')
 
-        self.note_value_parser = self.note_parser ^ self.hertz_parser ^ self.score_parser
-
+        # parse a string like "35%" into an amplitude value
         self.amp_parser = (real + '%'
                            ).setParseAction(lambda t: t[0] / 100.).setResultsName('amplitude')
 
-        self.gain_parser = (may_operator + no_whites + real + no_whites + pp.Literal('dB').suppress()
+        # parse a string like "-10dB" into an amplitude value
+        self.gain_parser = (may_sign + no_whites + real + no_whites + pp.Literal('dB').suppress()
                             ).setParseAction(lambda t: 10. ** (t[0] * t[1] / 20.)).setResultsName('amplitude')
 
+        # assign a frequency to a specified note name: "A4=440Hz". Internally the frequency for A4 is calculated.
         self.base_parser = (full_note + pp.Literal('=').suppress() + self.hertz_parser
                             ).setParseAction(lambda t: t[1] * (self.__root__ ** -t[0])).setResultsName('base_freq')
 
-        self.input_parser = self.note_value_parser ^ self.base_parser ^ self.amp_parser ^ self.gain_parser
+        # all properties parser
+        # todo: not all properties are parsed, yet
+        self.input_parser = self.note_parser ^ \
+                            self.hertz_parser ^ \
+                            self.score_parser ^ \
+                            self.base_parser ^ \
+                            self.amp_parser ^ \
+                            self.gain_parser
 
         # *** initializations ***
         self.__note_value__ = 0.
         self.__base_freq__ = 440.
         self.base_freq = base_freq
 
-        self.scale = scale
+        self.key = new_scale
         self.__names__ = 'C D EF G A B'
         self.clef = clef
         self.__clef__ = 'violin'
@@ -167,6 +185,7 @@ class MusicConverter:
         """
         The note_value is the core property-value of the converter class. The whole numbers represent the keys on the
         piano keyboard, zero being the A above the middle C (A4). Float values express tones between the keys.
+        :return: note value
         """
         return self.__note_value__
 
@@ -174,7 +193,7 @@ class MusicConverter:
     def note_value(self, new_val):
         if isinstance(new_val, str):
             try:
-                new_val = self.note_value_parser.parseString(new_val)[0]
+                new_val = self.note_parser.parseString(new_val)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_val}" @ col {e.col}!')
 
@@ -189,6 +208,11 @@ class MusicConverter:
     # *** properties for conversion to the physical world ***
     @property
     def frequency(self):
+        """
+        converts the converters note_value into its corresponding frequency
+        using the base frequency (default is A4=440Hz)
+        :return: frequency in Hz
+        """
         return self.base_freq * (self.__root__ ** self.__note_value__)
 
     @frequency.setter
@@ -206,9 +230,13 @@ class MusicConverter:
         else:
             raise TypeError('MusicConverter.frequency only accepts <str>, <float>, or <int>')
 
-
     @property
     def base_freq(self):
+        """
+        base frequency. note value 0 has this frequency. all other frequencies / note values are calculated
+        on this base
+        :return: base frequency in Hz
+        """
         return self.__base_freq__
 
     @base_freq.setter
@@ -228,13 +256,17 @@ class MusicConverter:
 
     @property
     def amplitude(self):
+        """
+        this amplitude can be used by e.g. an audio app to control the loudness
+        :return: amplitude as a factor 0..1
+        """
         return self.__amplitude__
 
     @amplitude.setter
     def amplitude(self, new_amp):
         if isinstance(new_amp, str):
             try:
-                new_freq = self.amp_parser.parseString(new_amp)[0]
+                new_amp = self.amp_parser.parseString(new_amp)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_amp}" @ col {e.col}!')
         if isinstance(new_amp, (int, float)):
@@ -247,10 +279,18 @@ class MusicConverter:
 
     @property
     def gain(self):
+        """
+        a second way to look at the amplitude is gain.
+        :return: gain in dB -inf..0
+        """
         return 20. * log10(self.__amplitude__)
 
     @gain.setter
     def gain(self, new_gain):
+        """
+        :param new_gain: pass new gain as number (float or int) or as string to be parsed
+        :return: None. gain value is converted into an amplitude value an stored this class' instance
+        """
         if isinstance(new_gain, str):
             try:
                 self.__amplitude__ = self.gain_parser.parseString(new_gain)[0]
@@ -262,18 +302,24 @@ class MusicConverter:
             else:
                 raise MusicConverterError(f'maximum <gain> is 0.0dB')
         else:
-            raise TypeError(f'new_amp must be int, float, or str!')
+            raise TypeError(f'MusicConverter.gain only accepts <str>, <float>, or <int>')
 
     # *** properties for conversion to the musical world ***
     @property
     def octave(self):
+        """
+        :return: the octave the current note value is in: A4 is in octave 4
+        """
         return int(ceil((round(self.note_value) - 2) / 12) + 4)
 
     @property
     def note_name(self):
+        """
+        :return: name of the current note value as string
+        """
         steps = int(round(self.note_value))
         octave = self.octave
-        names = {
+        note_names = {
             -9: f'C{octave}',
             -8: f'C#{octave}/Db{octave}',
             -7: f'D{octave}',
@@ -287,7 +333,7 @@ class MusicConverter:
             1: f'A#{octave}/Bb{octave}',
             2: f'B{octave}'
         }
-        name = names[steps - (octave - 4) * 12]
+        name = note_names[steps - (octave - 4) * 12]
 
         cents = str(int(round((self.note_value - steps) * 100)))
         cents_str = '' if cents == '0' else '+' + cents if not cents.startswith('-') else cents
@@ -296,6 +342,10 @@ class MusicConverter:
 
     @note_name.setter
     def note_name(self, new_name):
+        """
+        converts a given note name into a note value, the note value is stored in this class' instance
+        :param new_name: name of new note
+        """
         if isinstance(new_name, str):
             try:
                 self.__note_value__ = self.note_parser.parseString(new_name)[0]
@@ -305,83 +355,97 @@ class MusicConverter:
             raise TypeError('MusicConverter.note_name only accepts <str>')
 
     @property
-    def scale(self):
-        return self.__scale__
+    def key(self):
+        """
+        :return: the current key used to calc key_name and notation
+        """
+        return self.__key__
 
-    @scale.setter
-    def scale(self, new_scale):
-        if new_scale in self.scales:
-            self.__scale__ = new_scale
+    @key.setter
+    def key(self, new_key):
+        if new_key in self.keys:
+            self.__key__ = new_key
         else:
-            scales = '", "'.join([scale for scale in self.scales])
-            raise MusicConverterError(f'<scale> must be one of "{scales}"')
+            keys = '", "'.join([exiting_key for exiting_key in self.keys])
+            raise MusicConverterError(f'<key> must be one of "{keys}"')
 
     @property
-    def scale_name(self):
-        used = self.scales[self.scale][1]
+    def key_name(self):
+        used_ivories = self.keys[self.key][1][:]
         amendment = ''
-        index = int((round(self.note_value) + 9) % 12)
-        if used[index] == 'b':
-            index += 1
+        note_octave_index = int((round(self.note_value) + 9) % 12)
+        if used_ivories[note_octave_index] == 'b':
+            note_octave_index += 1
             amendment = 'b'
-        elif used[index] == '#':
-            index -= 1
+        elif used_ivories[note_octave_index] == '#':
+            note_octave_index -= 1
             amendment = '#'
         else:
-            if self.__names__[index] == ' ':
-                if 'b' in used:
-                    index += 1
+            if self.__names__[note_octave_index] == ' ':
+                if 'b' in used_ivories:
+                    note_octave_index += 1
                     amendment = 'b'
                 else:
-                    index -= 1
+                    note_octave_index -= 1
                     amendment = '#'
 
-        return f'{self.__names__[index]}{amendment}{self.octave}'
+        return f'{self.__names__[note_octave_index]}{amendment}{self.octave}'
 
     @property
-    def scales(self):
-        scales = {
-            'C/a'  : ( 0, '_ _ __ _ _ _'),
-            'F/d'  : ( 1, '_ _ __ _ _b '),
-            'Bb/g' : ( 2, '_ _b _ _ _b '),
-            'Eb/c' : ( 3, '_ _b _ _b b '),
-            'Ab/f' : ( 4, '_b b _ _b b '),
-            'Db/bb': ( 5, '_b b _b b b '),
-            'C#/a#': ( 5, '## # ## # # '),
-            'F#/d#': ( 6, ' # # ## # #_'),
-            'Gb/eb': ( 6, ' b b _b b bb'),
-            'B/g#' : ( 7, ' # #_ # # #_'),
-            'Cb/ab': ( 7, ' b bb b b bb'),
-            'E/c#' : ( 8, ' # #_ # #_ _'),
-            'A/f#' : ( 9, ' #_ _ # #_ _'),
-            'D/b'  : (10, ' #_ _ #_ _ _'),
-            'G/e'  : (11, '_ _ _ #_ _ _')
+    def keys(self):
+        """
+        available keys
+        :return: dict of available keys mapping some internal conversion data
+        """
+        return {
+            'C/a':    (0, '_ _ __ _ _ _'),
+            'F/d':    (1, '_ _ __ _ _b '),
+            'Bb/g':   (2, '_ _b _ _ _b '),
+            'Eb/c':   (3, '_ _b _ _b b '),
+            'Ab/f':   (4, '_b b _ _b b '),
+            'Db/bb':  (5, '_b b _b b b '),
+            'C#/a#':  (5, '## # ## # # '),
+            'F#/d#':  (6, ' # # ## # #_'),
+            'Gb/eb':  (6, ' b b _b b bb'),
+            'B/g#':   (7, ' # #_ # # #_'),
+            'Cb/ab':  (7, ' b bb b b bb'),
+            'E/c#':   (8, ' # #_ # #_ _'),
+            'A/f#':   (9, ' #_ _ # #_ _'),
+            'D/b':   (10, ' #_ _ #_ _ _'),
+            'G/e':   (11, '_ _ _ #_ _ _')
         }
-        return scales
 
     @property
-    def score(self):
-        used = self.scales[self.scale][1]
+    def notation(self):
+        """
+        based on the current key and clef the note value is converted into a notation (head position and accidental)
+        :return: tuple(head_position, accidental)
+        """
+        used_ivories = self.keys[self.key][1][:]
 
-        index = int((round(self.note_value) + 9) % 12)
+        note_octave_index = int((round(self.note_value) + 9) % 12)
 
-        position = (self.octave - 4) * 7 + self.clefs[self.clef]
-        for i in range(index):
-            if not used[i] == ' ':
-                position += 1
+        head_position = (self.octave - 4) * 7 + self.clefs[self.clef]
+        for i in range(note_octave_index):
+            if not used_ivories[i] == ' ':
+                head_position += 1
 
         accidental = '_'
-        tendency = 'b' if 'b' in used else '#'
-        if used[index] == ' ':
-            position -= 1
-            if self.__names__[index] == ' ':
+        tendency = 'b' if 'b' in used_ivories else '#'
+        if used_ivories[note_octave_index] == ' ':
+            head_position -= 1
+            if self.__names__[note_octave_index] == ' ':
                 accidental = tendency
             else:
                 accidental = 'n'
-        return position, accidental
+        return head_position, accidental
 
-    @score.setter
-    def score(self, new_score):
+    @notation.setter
+    def notation(self, new_score):
+        """
+        parses a string like "sc 5:#" and converts it into the note value based on the current key and clef
+        :param new_score: string holding the head position and accidental
+        """
         if isinstance(new_score, str):
             try:
                 self.__note_value__ = self.score_parser.parseString(new_score)[0]
@@ -392,15 +456,22 @@ class MusicConverter:
 
     @property
     def clefs(self):
-        clefs = {
+        """
+        available clefs
+        :return: dict holding the available clefs and corresponding offsets for the notation-conversion
+        """
+        return {
             'violin': -6,
             'alto': 0,
             'bass': +6
         }
-        return clefs
 
     @property
     def clef(self):
+        """
+        current clef
+        :return: current clef as string
+        """
         return self.__clef__
 
     @clef.setter
@@ -413,24 +484,36 @@ class MusicConverter:
         else:
             raise TypeError('MusicConverter.clef only accepts <str>')
 
+    def set(self, input):
+        """
+        use the classes parsers to set the classes properties
+        :param input:
+        :return:
+        """
+        if isinstance(input, str):
+            try:
+                result = self.input_parser.parseString(input).asDict()
+            except pp.ParseException as e:
+                raise MusicConverterError(f'<input_parser> could not parse "{input}" @ col {e.col}; ')
 
-
+            for attribute in result:
+                setattr(self, attribute, result[attribute])
+        else:
+            raise TypeError('MusicConverter.set() only accepts <str> as input')
 
 if __name__ == '__main__':
-    from sys import stderr
     converter = MusicConverter()
 
     # converter.score = 'sc 0:n'
     # converter.note_value = 1
-
 
     piano = "U'U'UU'U'U'U"
     octaves = ''.join(str(i) * 12 for i in range(9))
     names = 'C D EF G A B'
 
     # scale = 'C/a'
-    scale = 'F/d'
-    # scale = 'Bb/g'
+    # scale = 'F/d'
+    scale = 'Bb/g'
     # scale = 'Eb/c'
     # scale = 'Ab/f'
     # scale = 'Db/bb'
@@ -444,17 +527,17 @@ if __name__ == '__main__':
     # scale = 'D/b'
     # scale = 'G/e'
 
-    input_str = 'sc 0:n#'
+    input_str = 'Bb5'
     print(f'input: "{input_str}"')
-    converter.scale = scale
+    converter.key = scale
     converter.clef = 'violin'
-    converter.score = input_str
+    converter.set(input_str)
 
-    used = converter.scales[scale][1]
+    used = converter.keys[scale][1]
     index = 57 + int(round(converter.note_value))
     key = ' ' * index + 'I' + ' ' * (107 - index)
 
-    print(f'scale: {converter.scale}')
+    print(f'scale: {converter.key}')
     print(f'clef: {converter.clef}')
     print()
     print(octaves[9:-11])
@@ -464,5 +547,5 @@ if __name__ == '__main__':
     print(key[9:-11])
     print()
     print(f'value: {converter.note_value}')
-    print(f'name: {converter.scale_name}')
-    print(f'score: {converter.score}\n')
+    print(f'name: {converter.key_name}')
+    print(f'score: {converter.notation}\n')

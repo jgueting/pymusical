@@ -1,2 +1,2 @@
-# pymusical
-converter for musical and physical values
+**PyMusical**
+converter between musical and physical values

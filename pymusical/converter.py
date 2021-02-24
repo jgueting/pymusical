@@ -91,7 +91,7 @@ class MusicConverter:
             position -= self.clefs[self.clef]
             octave_offset = position // 7
             position = position % 7
-            used_values = [-9 + i for i in range(12) if not converter.keys[converter.key][1][i] == ' ']
+            used_values = [-9 + i for i in range(12) if not self.keys[self.key][1][i] == ' ']
 
             if len(tokens) > 1:
                 if tokens[1] == 'b':

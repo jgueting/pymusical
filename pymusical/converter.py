@@ -373,7 +373,7 @@ class MusicConverter:
     def key_name(self):
         used_ivories = self.keys[self.key][1][:]
         amendment = ''
-        note_octave_index = int((round(self.note_value) + 9) % 12)
+        note_octave_index = int(round(self.note_value) + 9)
         if used_ivories[note_octave_index] == 'b':
             note_octave_index += 1
             amendment = 'b'
@@ -389,7 +389,7 @@ class MusicConverter:
                     note_octave_index -= 1
                     amendment = '#'
 
-        return f'{self.__names__[note_octave_index]}{amendment}{self.octave}'
+        return f'{self.__names__[note_octave_index % 12]}{amendment}{self.octave}'
 
     @property
     def keys(self):
@@ -406,7 +406,7 @@ class MusicConverter:
             'Db/bb':  (5, '_b b _b b b '),
             'C#/a#':  (5, '## # ## # # '),
             'F#/d#':  (6, ' # # ## # #_'),
-            'Gb/eb':  (6, ' b b _b b bb'),
+            'Gb/eb':  (6, ' b bb_b b b '),
             'B/g#':   (7, ' # #_ # # #_'),
             'Cb/ab':  (7, ' b bb b b bb'),
             'E/c#':   (8, ' # #_ # #_ _'),
@@ -421,24 +421,59 @@ class MusicConverter:
         based on the current key and clef the note value is converted into a notation (head position and accidental)
         :return: tuple(head_position, accidental)
         """
+        print(f'{self.key}; {self.note_name}')
+
+        # basic (C/a) note values
+        values = [-9, -7, -5, -4, -2, 0, 2]
+
+        # used piano keys
         used_ivories = self.keys[self.key][1][:]
+        print(f'<{used_ivories}>')
 
-        note_octave_index = int((round(self.note_value) + 9) % 12)
+        # calc the head position of the C of the current octave
+        head_offset = (self.octave - 4) * 7 + self.clefs[self.clef]
+        print(f'head_offset: {head_offset}')
 
-        head_position = (self.octave - 4) * 7 + self.clefs[self.clef]
-        for i in range(note_octave_index):
-            if not used_ivories[i] == ' ':
-                head_position += 1
+        # actual note values
+        helper = [1 if c == '#' else -1 if c == 'b' else 0 for c in used_ivories.replace(' ', '')]
+        helper.append(helper[0])
+        # helper.insert(0, helper[6])
+        print(f'helper: {helper}')
+        values = [values[i] + helper[i] for i in range(7)]
+        values.append(values[0] + 12)
+        # values.insert(0, values[6] - 12)
+        print(f'values: {values}')
 
-        accidental = '_'
-        tendency = 'b' if 'b' in used_ivories else '#'
-        if used_ivories[note_octave_index] == ' ':
-            head_position -= 1
-            if self.__names__[note_octave_index] == ' ':
-                accidental = tendency
-            else:
-                accidental = 'n'
-        return head_position, accidental
+        # calc the index of the current note value within the current octave (C=0)
+        note_index_in_octave = int((round(self.note_value) + 9) % 12) -9
+        print(f'note_index_in_octave: {note_index_in_octave}')
+
+        # signs
+        sign = {
+            -2: 'bb',
+            -1: 'b',
+             0: 'n',
+             1: '#',
+             2: '##'
+        }
+
+        # adjust the head position according to the note_index_in_octave
+        try:
+            if note_index_in_octave == values[6] - 12:
+                note_index_in_octave += 12
+                head_offset -= 7
+            head_position = values.index(note_index_in_octave)
+            notation = [(head_offset + head_position, '_')]
+        except ValueError:
+            for i in range(8):
+                if values[i] > note_index_in_octave:
+                    break
+            head_position = i
+            print(f'helpers: ({helper[head_position - 1]}, {helper[head_position]}) -> ({helper[head_position - 1] + 1}, {helper[head_position] - 1})')
+            notation = [(head_offset + head_position - 1, sign[helper[head_position - 1] + 1]),
+                        (head_offset + head_position, sign[helper[head_position] - 1])]
+        print(f'result: {notation}\n')
+        return notation
 
     @notation.setter
     def notation(self, new_score):
@@ -500,3 +535,37 @@ class MusicConverter:
                 setattr(self, attribute, result[attribute])
         else:
             raise TypeError('MusicConverter.set() only accepts <str> as input')
+
+if __name__ == '__main__':
+    converter = MusicConverter()
+    converter.clef = 'violin'
+
+    def piano(value, key):
+        piano_keys = ('C"D"EF"G"A"B' * 9)[9:-11]
+        key_spec = (converter.keys[key][1] * 9)[9:-11]
+        note = ' ' * (48 + value) + 'A'
+        print(piano_keys)
+        print(key_spec)
+        print(note)
+
+
+    heads = {key: [] for key in converter.keys}
+    heads['value'] = []
+    heads['name'] = []
+
+    for value in range(-10, 5):
+        converter.note_value = value
+        heads['value'].append(converter.note_value)
+        heads['name'].append(converter.note_name)
+        for key in converter.keys:
+            converter.key = key
+            heads[key].append('/'.join([f'{item[0]:2d}:{item[1]:2}' for item in converter.notation]))
+
+    with open('positions.csv', 'w') as file:
+        values = '       ;' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
+        file.write(values)
+        names  = '       ;' + ';'.join([f'{name:11}' for name in heads['name']]) + '\n'
+        file.write(names)
+        for key in converter.keys:
+            head_numbers = f'{key:7};' + ';'.join(f'{notation:11}' for notation in heads[key]) + '\n'
+            file.write(head_numbers)

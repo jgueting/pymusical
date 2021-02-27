@@ -84,65 +84,66 @@ class MusicConverter:
                 real + 'Hz'
         ).setParseAction(lambda t: t[0]).setResultsName('frequency')
 
-        # parse action for score parser
-        def score_parse_action(tokens):
-            position = tokens[0]
 
-            position -= self.clefs[self.clef]
-            octave_offset = position // 7
-            position = position % 7
-            used_values = [-9 + i for i in range(12) if not self.keys[self.key][1][i] == ' ']
-
-            if len(tokens) > 1:
-                if tokens[1] == 'b':
-                    accidental_offset = -1
-                elif tokens[1] == '#':
-                    accidental_offset = +1
-                elif tokens[1] == '##':
-                    accidental_offset = 2
-                elif tokens[1] == 'bb':
-                    accidental_offset = -2
-                elif tokens[1] in ['n', 'n#', 'nb']:
-                    vorzeichen = self.keys[self.key][1].replace(' ', '')[position]
-                    if vorzeichen not in '#b':
-                        raise MusicConverterError('natural sign not applicable!')
-                    else:
-                        if vorzeichen == 'b':
-                            accidental_offset = 1
-                            if len(tokens[1]) > 1:
-                                if tokens[1][1] == '#':
-                                    accidental_offset = 2
-                                else:
-                                    raise MusicConverterError('natural flat sign not applicable')
-                        else:
-                            accidental_offset = -1
-                            if len(tokens[1]) > 1:
-                                if tokens[1][1] == 'b':
-                                    accidental_offset = -2
-                                else:
-                                    raise MusicConverterError('natural sharp sign not applicable')
-                else:
-                    accidental_offset = 0
-            else:
-                accidental_offset = 0
-
-            return octave_offset * 12 + used_values[position] + accidental_offset
-
+        # # parse action for score parser
+        # def score_parse_action(tokens):
+        #     position = tokens[0]
+        #
+        #     position -= self.clefs[self.clef]
+        #     octave_offset = position // 7
+        #     position = position % 7
+        #     used_values = [-9 + i for i in range(12) if not self.keys[self.key][1][i] == ' ']
+        #
+        #     if len(tokens) > 1:
+        #         if tokens[1] == 'b':
+        #             accidental_offset = -1
+        #         elif tokens[1] == '#':
+        #             accidental_offset = +1
+        #         elif tokens[1] == '##':
+        #             accidental_offset = 2
+        #         elif tokens[1] == 'bb':
+        #             accidental_offset = -2
+        #         elif tokens[1] in ['n', 'n#', 'nb']:
+        #             vorzeichen = self.keys[self.key][1].replace(' ', '')[position]
+        #             if vorzeichen not in '#b':
+        #                 raise MusicConverterError('natural sign not applicable!')
+        #             else:
+        #                 if vorzeichen == 'b':
+        #                     accidental_offset = 1
+        #                     if len(tokens[1]) > 1:
+        #                         if tokens[1][1] == '#':
+        #                             accidental_offset = 2
+        #                         else:
+        #                             raise MusicConverterError('natural flat sign not applicable')
+        #                 else:
+        #                     accidental_offset = -1
+        #                     if len(tokens[1]) > 1:
+        #                         if tokens[1][1] == 'b':
+        #                             accidental_offset = -2
+        #                         else:
+        #                             raise MusicConverterError('natural sharp sign not applicable')
+        #         else:
+        #             accidental_offset = 0
+        #     else:
+        #         accidental_offset = 0
+        #
+        #     return octave_offset * 12 + used_values[position] + accidental_offset
+        #
         # parses a string like "sc -3:#" into a note value (musical half tone step)
         self.score_parser = (
             pp.Keyword('sc').suppress() + integer + pp.Literal(':').suppress() +
             (
                 pp.Keyword('##') |
                 pp.Keyword('bb') |
-                pp.Keyword('n#') |
-                pp.Keyword('nb') |
+                # pp.Keyword('n#') |
+                # pp.Keyword('nb') |
                 pp.Keyword('_') |
                 pp.Keyword('#') |
                 pp.Keyword('b') |
                 pp.Keyword('n')
             ) |
             pp.Keyword('sc').suppress() + integer + pp.LineEnd()
-        ).setParseAction(score_parse_action).setResultsName('note_value')
+        ).setResultsName('notation')  # .setParseAction(score_parse_action).setResultsName('note_value')
 
         # parse a string like "35%" into an amplitude value
         self.amp_parser = (real + '%'
@@ -421,35 +422,25 @@ class MusicConverter:
         based on the current key and clef the note value is converted into a notation (head position and accidental)
         :return: tuple(head_position, accidental)
         """
-        print(f'{self.key}; {self.note_name}')
-
         # basic (C/a) note values
         values = [-9, -7, -5, -4, -2, 0, 2]
 
-        # used piano keys
-        used_ivories = self.keys[self.key][1][:]
-        print(f'<{used_ivories}>')
 
         # calc the head position of the C of the current octave
         head_offset = (self.octave - 4) * 7 + self.clefs[self.clef]
-        print(f'head_offset: {head_offset}')
 
         # actual note values
-        helper = [1 if c == '#' else -1 if c == 'b' else 0 for c in used_ivories.replace(' ', '')]
-        helper.append(helper[0])
-        # helper.insert(0, helper[6])
-        print(f'helper: {helper}')
-        values = [values[i] + helper[i] for i in range(7)]
+        key_accidentals = self.keys[self.key][1].replace(' ', '')
+        key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in key_accidentals]
+        key_offset.append(key_offset[0])
+        values = [values[i] + key_offset[i] for i in range(7)]
         values.append(values[0] + 12)
-        # values.insert(0, values[6] - 12)
-        print(f'values: {values}')
 
         # calc the index of the current note value within the current octave (C=0)
         note_index_in_octave = int((round(self.note_value) + 9) % 12) -9
-        print(f'note_index_in_octave: {note_index_in_octave}')
 
         # signs
-        sign = {
+        acc = {
             -2: 'bb',
             -1: 'b',
              0: 'n',
@@ -469,10 +460,8 @@ class MusicConverter:
                 if values[i] > note_index_in_octave:
                     break
             head_position = i
-            print(f'helpers: ({helper[head_position - 1]}, {helper[head_position]}) -> ({helper[head_position - 1] + 1}, {helper[head_position] - 1})')
-            notation = [(head_offset + head_position - 1, sign[helper[head_position - 1] + 1]),
-                        (head_offset + head_position, sign[helper[head_position] - 1])]
-        print(f'result: {notation}\n')
+            notation = [(head_offset + head_position - 1, acc[key_offset[head_position - 1] + 1]),
+                        (head_offset + head_position, acc[key_offset[head_position] - 1])]
         return notation
 
     @notation.setter
@@ -481,13 +470,84 @@ class MusicConverter:
         parses a string like "sc 5:#" and converts it into the note value based on the current key and clef
         :param new_score: string holding the head position and accidental
         """
+
+        # input verification
+        signs = ['##', '#', 'n', '_', 'b', 'bb']
         if isinstance(new_score, str):
             try:
-                self.__note_value__ = self.score_parser.parseString(new_score)[0]
+                new_score = self.score_parser.parseString(new_score)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_score}" @ col {e.col}!')
+        elif isinstance(new_score, list):
+            if len(new_score) < 2:
+                new_score.append('_')
+            new_score = tuple(new_score)
+        elif isinstance(new_score, int):
+            new_score = (new_score, '_')
+
+        if isinstance(new_score, tuple):
+            if len(new_score) == 2 and isinstance(new_score[0], int) and isinstance(new_score[1], str) \
+                    and new_score[1] in signs:
+                score = new_score
+            else:
+                raise MusicConverterError(f"MusicConverter.notation must be formed (<head position>, <accidental>) e.g (-7, '_') "
+                                          f"with accidental in {signs}")
         else:
-            raise TypeError('MusicConverter.score only accepts <str>')
+            raise TypeError(f'MusicConverter.notation only accepts <str>, <int>, <list>, or <tuple> ( is <{type(new_score).__name__}>: {new_score})')
+
+        # calculation
+        head_position, acc = score
+        print(f'  notation: {head_position}:{acc}')
+        base_pos = head_position - self.clefs[self.clef]
+        print(f'  base_pos: {base_pos}')
+        octave = base_pos // 7 + 4
+        print(f'  octave: {octave}')
+        head_index_in_octave = base_pos % 7
+        print(f'  head_index_in_octave: {head_index_in_octave}')
+
+        # calc note value
+        values = [-9, -7, -5, -4, -2, 0, 2]  # C/a - values
+        key_accidentals = self.keys[self.key][1].replace(' ', '')
+        key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in key_accidentals]
+        key_offset.append(key_offset[0])
+        values = [values[i] + key_offset[i] for i in range(7)]
+        print(f'  values: {values}')
+
+        note_index_in_octave = values[head_index_in_octave]
+        print(f'  note_index_in_octave: {note_index_in_octave}')
+        octave_c_value = (octave - 4) * 12
+        print(f'  octave_c_value: {octave_c_value}')
+        head_note_value = note_index_in_octave + octave_c_value
+        print(f'  head_note_value: {head_note_value}')
+
+        # calc accidental offset
+        vorzeichen = key_accidentals[head_index_in_octave]
+        print(f'  Vorzeichen: {vorzeichen}')
+        print(f'  Versetzungszeichen: {acc}')
+        acc_offset = 0
+        if acc == '_':
+            pass
+        elif acc == 'n' and vorzeichen in ['b', '#']:
+            if vorzeichen == 'b':
+                acc_offset = 1
+            else:
+                acc_offset = -1
+        elif acc in ['b', '#'] and vorzeichen == '_':
+            if acc == 'b':
+                acc_offset = -1
+            else:
+                acc_offset = 1
+        elif acc == 'bb' and vorzeichen == 'b':
+            acc_offset = -1
+        elif acc == '##' and vorzeichen == '#':
+            acc_offset = 1
+        else:
+            print(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
+            # raise MusicConverterError(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
+        print(f'  acc_offset: {acc_offset}')
+        print(f'  note_value: {head_note_value + acc_offset}\n')
+
+
 
     @property
     def clefs(self):
@@ -530,7 +590,7 @@ class MusicConverter:
                 result = self.input_parser.parseString(input).asDict()
             except pp.ParseException as e:
                 raise MusicConverterError(f'<input_parser> could not parse "{input}" @ col {e.col}; ')
-
+            print(result)
             for attribute in result:
                 setattr(self, attribute, result[attribute])
         else:
@@ -539,15 +599,6 @@ class MusicConverter:
 if __name__ == '__main__':
     converter = MusicConverter()
     converter.clef = 'violin'
-
-    def piano(value, key):
-        piano_keys = ('C"D"EF"G"A"B' * 9)[9:-11]
-        key_spec = (converter.keys[key][1] * 9)[9:-11]
-        note = ' ' * (48 + value) + 'A'
-        print(piano_keys)
-        print(key_spec)
-        print(note)
-
 
     heads = {key: [] for key in converter.keys}
     heads['value'] = []
@@ -558,11 +609,14 @@ if __name__ == '__main__':
         heads['value'].append(converter.note_value)
         heads['name'].append(converter.note_name)
         for key in converter.keys:
+            print(f'note: {converter.note_name} ({value}); key: {key}')
             converter.key = key
             heads[key].append('/'.join([f'{item[0]:2d}:{item[1]:2}' for item in converter.notation]))
+            for score in converter.notation:
+                converter.notation = score
 
     with open('positions.csv', 'w') as file:
-        values = '       ;' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
+        values = f'{converter.clef:7};' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
         file.write(values)
         names  = '       ;' + ';'.join([f'{name:11}' for name in heads['name']]) + '\n'
         file.write(names)

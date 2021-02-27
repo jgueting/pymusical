@@ -473,6 +473,7 @@ class MusicConverter:
 
         # input verification
         signs = ['##', '#', 'n', '_', 'b', 'bb']
+        print(f'new_score: {new_score} ({type(new_score).__name__})')
         if isinstance(new_score, str):
             try:
                 new_score = self.score_parser.parseString(new_score)[0]
@@ -482,9 +483,15 @@ class MusicConverter:
             if len(new_score) < 2:
                 new_score.append('_')
             new_score = tuple(new_score)
-        elif isinstance(new_score, int):
+        elif isinstance(new_score, (int, tuple)):
+            pass
+        else:
+            raise TypeError(f'MusicConverter.notation only accepts <str>, <int>, <list>, or <tuple> ( is <{type(new_score).__name__}>: {new_score})')
+
+        if isinstance(new_score, int):
             new_score = (new_score, '_')
 
+        print(f'new_score: {new_score} ({type(new_score).__name__})')
         if isinstance(new_score, tuple):
             if len(new_score) == 2 and isinstance(new_score[0], int) and isinstance(new_score[1], str) \
                     and new_score[1] in signs:
@@ -492,8 +499,6 @@ class MusicConverter:
             else:
                 raise MusicConverterError(f"MusicConverter.notation must be formed (<head position>, <accidental>) e.g (-7, '_') "
                                           f"with accidental in {signs}")
-        else:
-            raise TypeError(f'MusicConverter.notation only accepts <str>, <int>, <list>, or <tuple> ( is <{type(new_score).__name__}>: {new_score})')
 
         # calculation
         head_position, acc = score
@@ -599,27 +604,31 @@ class MusicConverter:
 if __name__ == '__main__':
     converter = MusicConverter()
     converter.clef = 'violin'
+    converter.key = 'C/a'
 
-    heads = {key: [] for key in converter.keys}
-    heads['value'] = []
-    heads['name'] = []
+    converter.notation = (-1, '_')
+    print(converter.note_name)
 
-    for value in range(-10, 5):
-        converter.note_value = value
-        heads['value'].append(converter.note_value)
-        heads['name'].append(converter.note_name)
-        for key in converter.keys:
-            print(f'note: {converter.note_name} ({value}); key: {key}')
-            converter.key = key
-            heads[key].append('/'.join([f'{item[0]:2d}:{item[1]:2}' for item in converter.notation]))
-            for score in converter.notation:
-                converter.notation = score
-
-    with open('positions.csv', 'w') as file:
-        values = f'{converter.clef:7};' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
-        file.write(values)
-        names  = '       ;' + ';'.join([f'{name:11}' for name in heads['name']]) + '\n'
-        file.write(names)
-        for key in converter.keys:
-            head_numbers = f'{key:7};' + ';'.join(f'{notation:11}' for notation in heads[key]) + '\n'
-            file.write(head_numbers)
+    # heads = {key: [] for key in converter.keys}
+    # heads['value'] = []
+    # heads['name'] = []
+    #
+    # for value in range(-10, 5):
+    #     converter.note_value = value
+    #     heads['value'].append(converter.note_value)
+    #     heads['name'].append(converter.note_name)
+    #     for key in converter.keys:
+    #         print(f'note: {converter.note_name} ({value}); key: {key}')
+    #         converter.key = key
+    #         heads[key].append('/'.join([f'{item[0]:2d}:{item[1]:2}' for item in converter.notation]))
+    #         for score in converter.notation:
+    #             converter.notation = score
+    #
+    # with open('positions.csv', 'w') as file:
+    #     values = f'{converter.clef:7};' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
+    #     file.write(values)
+    #     names  = '       ;' + ';'.join([f'{name:11}' for name in heads['name']]) + '\n'
+    #     file.write(names)
+    #     for key in converter.keys:
+    #         head_numbers = f'{key:7};' + ';'.join(f'{notation:11}' for notation in heads[key]) + '\n'
+    #         file.write(head_numbers)

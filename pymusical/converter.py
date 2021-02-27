@@ -482,7 +482,12 @@ class MusicConverter:
             if len(new_score) < 2:
                 new_score.append('_')
             new_score = tuple(new_score)
-        elif isinstance(new_score, int):
+        elif isinstance(new_score, (int, tuple)):
+            pass
+        else:
+            raise TypeError(f'MusicConverter.notation only accepts <str>, <int>, <list>, or <tuple> ( is <{type(new_score).__name__}>: {new_score})')
+
+        if isinstance(new_score, int):
             new_score = (new_score, '_')
 
         if isinstance(new_score, tuple):
@@ -492,8 +497,6 @@ class MusicConverter:
             else:
                 raise MusicConverterError(f"MusicConverter.notation must be formed (<head position>, <accidental>) e.g (-7, '_') "
                                           f"with accidental in {signs}")
-        else:
-            raise TypeError(f'MusicConverter.notation only accepts <str>, <int>, <list>, or <tuple> ( is <{type(new_score).__name__}>: {new_score})')
 
         # calculation
         head_position, acc = score

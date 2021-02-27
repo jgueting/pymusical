@@ -467,10 +467,10 @@ class MusicConverter:
     @notation.setter
     def notation(self, new_score):
         """
-        parses a string like "sc 5:#" and converts it into the note value based on the current key and clef
+        parses a string like "sc 5:#" and converts it into the note value based on the current key and clef.
+        now accepts also tuple like (5, '#') or list like [5, '#'] or int like 5 (epuivalent to "sc 5" or "sc 5:_")
         :param new_score: string holding the head position and accidental
         """
-
         # input verification
         signs = ['##', '#', 'n', '_', 'b', 'bb']
         if isinstance(new_score, str):
@@ -497,13 +497,9 @@ class MusicConverter:
 
         # calculation
         head_position, acc = score
-        print(f'  notation: {head_position}:{acc}')
         base_pos = head_position - self.clefs[self.clef]
-        print(f'  base_pos: {base_pos}')
         octave = base_pos // 7 + 4
-        print(f'  octave: {octave}')
         head_index_in_octave = base_pos % 7
-        print(f'  head_index_in_octave: {head_index_in_octave}')
 
         # calc note value
         values = [-9, -7, -5, -4, -2, 0, 2]  # C/a - values
@@ -511,19 +507,13 @@ class MusicConverter:
         key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in key_accidentals]
         key_offset.append(key_offset[0])
         values = [values[i] + key_offset[i] for i in range(7)]
-        print(f'  values: {values}')
 
         note_index_in_octave = values[head_index_in_octave]
-        print(f'  note_index_in_octave: {note_index_in_octave}')
         octave_c_value = (octave - 4) * 12
-        print(f'  octave_c_value: {octave_c_value}')
         head_note_value = note_index_in_octave + octave_c_value
-        print(f'  head_note_value: {head_note_value}')
 
         # calc accidental offset
         vorzeichen = key_accidentals[head_index_in_octave]
-        print(f'  Vorzeichen: {vorzeichen}')
-        print(f'  Versetzungszeichen: {acc}')
         acc_offset = 0
         if acc == '_':
             pass
@@ -542,10 +532,9 @@ class MusicConverter:
         elif acc == '##' and vorzeichen == '#':
             acc_offset = 1
         else:
-            print(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
-            # raise MusicConverterError(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
-        print(f'  acc_offset: {acc_offset}')
-        print(f'  note_value: {head_note_value + acc_offset}\n')
+            raise MusicConverterError(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
+
+        self.note_value = head_note_value + acc_offset
 
 
 
@@ -595,31 +584,3 @@ class MusicConverter:
                 setattr(self, attribute, result[attribute])
         else:
             raise TypeError('MusicConverter.set() only accepts <str> as input')
-
-if __name__ == '__main__':
-    converter = MusicConverter()
-    converter.clef = 'violin'
-
-    heads = {key: [] for key in converter.keys}
-    heads['value'] = []
-    heads['name'] = []
-
-    for value in range(-10, 5):
-        converter.note_value = value
-        heads['value'].append(converter.note_value)
-        heads['name'].append(converter.note_name)
-        for key in converter.keys:
-            print(f'note: {converter.note_name} ({value}); key: {key}')
-            converter.key = key
-            heads[key].append('/'.join([f'{item[0]:2d}:{item[1]:2}' for item in converter.notation]))
-            for score in converter.notation:
-                converter.notation = score
-
-    with open('positions.csv', 'w') as file:
-        values = f'{converter.clef:7};' + ';'.join([f'{value:11d}' for value in heads['value']]) + '\n'
-        file.write(values)
-        names  = '       ;' + ';'.join([f'{name:11}' for name in heads['name']]) + '\n'
-        file.write(names)
-        for key in converter.keys:
-            head_numbers = f'{key:7};' + ';'.join(f'{notation:11}' for notation in heads[key]) + '\n'
-            file.write(head_numbers)

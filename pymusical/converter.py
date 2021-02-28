@@ -423,14 +423,16 @@ class MusicConverter:
         :return: tuple(head_position, accidental)
         """
         # basic (C/a) note values
-        c_values = [-9, -7, -5, -4, -2, 0, 2]
+        # c_values = [-9, -7, -5, -4, -2, 0, 2]
 
         # calc the head position of the C of the current octave
         head_offset = (self.octave - 4) * 7 + self.clefs[self.clef]
 
         # actual note values
         key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in self.keys[self.key][1].replace(' ', '')]
+        key_offset.append(key_offset[0])
         values = [i - 9 for i in range(12) if not self.keys[self.key][1][i] == ' ']
+        values.append(values[0] + 12)
 
         # calc the index of the current note value within the current octave (C=0)
         note_index_in_octave = int((round(self.note_value) + 9) % 12) -9
@@ -449,11 +451,11 @@ class MusicConverter:
             head_position = values.index(note_index_in_octave)
             notation = [(head_offset + head_position, '_')]
         except ValueError:
-            for i in range(7):
+            for i in range(8):
                 if values[i] > note_index_in_octave:
                     break
             head_position = i
-            notation = [(head_offset + head_position - 1, acc[key_offset[head_position - 1] + 1]),
+            notation = [(head_offset + head_position - 1, acc[key_offset[(head_position - 1) % 7] + 1]),
                         (head_offset + head_position, acc[key_offset[head_position] - 1])]
         return notation
 
@@ -498,18 +500,15 @@ class MusicConverter:
         head_index_in_octave = base_pos % 7
 
         # calc note value
-        values = [-9, -7, -5, -4, -2, 0, 2]  # C/a - values
-        key_accidentals = self.keys[self.key][1].replace(' ', '')
-        key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in key_accidentals]
-        key_offset.append(key_offset[0])
-        values = [values[i] + key_offset[i] for i in range(7)]
+
+        values = [i - 9 for i in range(12) if not self.keys[self.key][1][i] == ' ']
 
         note_index_in_octave = values[head_index_in_octave]
         octave_c_value = (octave - 4) * 12
         head_note_value = note_index_in_octave + octave_c_value
 
         # calc accidental offset
-        vorzeichen = key_accidentals[head_index_in_octave]
+        vorzeichen = self.keys[self.key][1].replace(' ', '')[head_index_in_octave]
         acc_offset = 0
         if acc == '_':
             pass
@@ -531,7 +530,6 @@ class MusicConverter:
             raise MusicConverterError(f"<{acc}> not applicable with <{vorzeichen}> in key {self.key}!")
 
         self.note_value = head_note_value + acc_offset
-
 
 
     @property
@@ -575,7 +573,6 @@ class MusicConverter:
                 result = self.input_parser.parseString(input).asDict()
             except pp.ParseException as e:
                 raise MusicConverterError(f'<input_parser> could not parse "{input}" @ col {e.col}; ')
-            print(result)
             for attribute in result:
                 setattr(self, attribute, result[attribute])
         else:
@@ -589,7 +586,6 @@ if __name__ == '__main__':
 
     converter.key = 'G/e'
     converter.note_value = 3
-    print(f'notation: {converter.notation}\n')
 
     values = []
     names = []
@@ -605,30 +601,31 @@ if __name__ == '__main__':
             heads[key].append(converter.notation)
 
     for key in heads:
-        print(f'{key}:')
         converter.key = key
         for item in heads[key]:
             index = heads[key].index(item)
-            print(f'  {names[index].strip()} ({values[index].strip()}): {item}')
             note_values = []
             for notation in item:
-                converter.notation = notation
-                value = converter.note_value
-                if int(values[index]) == value:
-                    note_values.append((value, ' '))
-                else:
-                    note_values.append((value, '$'))
+                try:
+                    converter.notation = notation
+                    value = converter.note_value
+                    if int(values[index]) == value:
+                        note_values.append((value, ' '))
+                    else:
+                        note_values.append((value, '$'))
+                except MusicConverterError as err:
+                    note_values.append((-111, '$'))
             recalc[key].append(note_values)
 
 
     with open('overview.csv', 'w') as file:
         file.write(f'{converter.clef:7};' + ';'.join(values) + ';\n')
         file.write(f'{" ":7};' + ';'.join(names) + ';\n')
-        file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
+        # file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
         for key in heads:
             vorzeichen = converter.keys[key][1][:].replace(' ', 'X')
             vorzeichen = vorzeichen[-1] + vorzeichen + vorzeichen[:2]
             file.write(f'{key:7};' + ';'.join(f'{c:11}' for c in vorzeichen) + ';\n')
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
-            file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
+            # file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')

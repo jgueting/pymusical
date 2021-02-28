@@ -407,7 +407,7 @@ class MusicConverter:
             'Db/bb':  (5, '_b b _b b b '),
             'C#/a#':  (5, '## # ## # # '),
             'F#/d#':  (6, ' # # ## # #_'),
-            'Gb/eb':  (6, ' b bb_b b b '),
+            'Gb/eb':  (6, ' b b _b b bb'),
             'B/g#':   (7, ' # #_ # # #_'),
             'Cb/ab':  (7, ' b bb b b bb'),
             'E/c#':   (8, ' # #_ # #_ _'),
@@ -423,18 +423,14 @@ class MusicConverter:
         :return: tuple(head_position, accidental)
         """
         # basic (C/a) note values
-        values = [-9, -7, -5, -4, -2, 0, 2]
-
+        c_values = [-9, -7, -5, -4, -2, 0, 2]
 
         # calc the head position of the C of the current octave
         head_offset = (self.octave - 4) * 7 + self.clefs[self.clef]
 
         # actual note values
-        key_accidentals = self.keys[self.key][1].replace(' ', '')
-        key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in key_accidentals]
-        key_offset.append(key_offset[0])
-        values = [values[i] + key_offset[i] for i in range(7)]
-        values.append(values[0] + 12)
+        key_offset = [1 if c == '#' else -1 if c == 'b' else 0 for c in self.keys[self.key][1].replace(' ', '')]
+        values = [i - 9 for i in range(12) if not self.keys[self.key][1][i] == ' ']
 
         # calc the index of the current note value within the current octave (C=0)
         note_index_in_octave = int((round(self.note_value) + 9) % 12) -9
@@ -450,13 +446,10 @@ class MusicConverter:
 
         # adjust the head position according to the note_index_in_octave
         try:
-            if note_index_in_octave == values[6] - 12:
-                note_index_in_octave += 12
-                head_offset -= 7
             head_position = values.index(note_index_in_octave)
             notation = [(head_offset + head_position, '_')]
         except ValueError:
-            for i in range(8):
+            for i in range(7):
                 if values[i] > note_index_in_octave:
                     break
             head_position = i
@@ -587,3 +580,55 @@ class MusicConverter:
                 setattr(self, attribute, result[attribute])
         else:
             raise TypeError('MusicConverter.set() only accepts <str> as input')
+
+
+if __name__ == '__main__':
+
+    converter = MusicConverter()
+    converter.clef = 'violin'
+
+    converter.key = 'G/e'
+    converter.note_value = 3
+    print(f'notation: {converter.notation}\n')
+
+    values = []
+    names = []
+    heads = {key: [] for key in converter.keys}
+    recalc = {key: [] for key in converter.keys}
+
+    for value in range(-10, 5):
+        converter.note_value = value
+        values.append(f'{converter.note_value:11}')
+        names.append(f'{converter.note_name:11}')
+        for key in converter.keys:
+            converter.key = key
+            heads[key].append(converter.notation)
+
+    for key in heads:
+        print(f'{key}:')
+        converter.key = key
+        for item in heads[key]:
+            index = heads[key].index(item)
+            print(f'  {names[index].strip()} ({values[index].strip()}): {item}')
+            note_values = []
+            for notation in item:
+                converter.notation = notation
+                value = converter.note_value
+                if int(values[index]) == value:
+                    note_values.append((value, ' '))
+                else:
+                    note_values.append((value, '$'))
+            recalc[key].append(note_values)
+
+
+    with open('overview.csv', 'w') as file:
+        file.write(f'{converter.clef:7};' + ';'.join(values) + ';\n')
+        file.write(f'{" ":7};' + ';'.join(names) + ';\n')
+        file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
+        for key in heads:
+            vorzeichen = converter.keys[key][1][:].replace(' ', 'X')
+            vorzeichen = vorzeichen[-1] + vorzeichen + vorzeichen[:2]
+            file.write(f'{key:7};' + ';'.join(f'{c:11}' for c in vorzeichen) + ';\n')
+            file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
+            file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
+            file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')

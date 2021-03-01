@@ -69,7 +69,7 @@ amp_parser = (
 
 gain_parser = (
     may_sign + real + pp.Literal('dB').suppress() + tok_end
-).setParseAction(lambda t: 10. ** (t[0] * t[1] / 20.)).setResultsName('amplitude')
+).setParseAction(lambda t: float(t[0] * t[1])).setResultsName('gain')
 
 # clef parser
 clef_parser = (

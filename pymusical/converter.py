@@ -22,11 +22,13 @@ class MusicConverter:
         # *** parser definitions ***
         # helper
         no_whites = pp.NotAny(pp.White())
+        tok_end = (pp.StringEnd() | pp.LineEnd()).suppress()
 
         # numbers
         real = pp.Combine(
             pp.Word(pp.nums) + pp.Optional(pp.Char(',.') + pp.Word(pp.nums))
         ).setParseAction(lambda t: float(t[0].replace(',', '.')))
+
         integer = (
                 pp.Optional(pp.Literal('-')) + pp.Word(pp.nums)
         ).setParseAction(lambda t: int(t[0] + t[1]) if len(t) > 1 else int(t[0]))
@@ -35,9 +37,8 @@ class MusicConverter:
         must_sign = pp.Char('+-').setParseAction(lambda t: float(t[0] + '1'))
         may_sign = pp.Optional(pp.Char('+-')).setParseAction(lambda t: float(t[0] + '1' if len(t) > 0 else '1'))
 
-        # cent: 100th part of a musical half tone step, sign required.
-        # usually between -50 and +50, returns a number between -.5 and .5
-        cent = (must_sign + no_whites + real + pp.StringEnd()).setParseAction(lambda t: t[0] * t[1] / 100)
+        # note value cents
+        cent = (must_sign + no_whites + real).setParseAction(lambda t: t[0] * t[1] / 100)
 
         # helpers for the note name parser
         note_name_offset = {
@@ -59,67 +60,60 @@ class MusicConverter:
                      + no_whites + pp.FollowedBy(octave) + octave
                      ).setParseAction(lambda t: sum(t))
 
-        hertz = (real + pp.Literal('Hz').suppress()).setParseAction(lambda t: t[0])
+        self.note_name_parser = (
+                full_note + pp.Optional(pp.White()).suppress() + pp.Optional(cent) + tok_end
+        ).setParseAction(lambda t: float(sum(t))).setResultsName('note_value')
 
-        # parse action for the note parser. checks if eg. "D#/Eb" contains the same note value twice and
-        # returns the note value
-        def note_parser_action(t):
-            if len(t) > 1:
-                if isinstance(t[1], int):
-                    if t[0] != t[1]:
-                        raise ValueError('Notes do not match!')
-                    t.pop(1)
-            return sum(t)
+        # frequency parsers
+        hertz = real + pp.Literal('Hz').suppress()
 
-        # parses a string like "A#4 +30" into a musical half tone step + cents
-        self.note_parser = (
-                pp.Optional(full_note +
-                            (pp.FollowedBy(no_whites + '/') +
-                             no_whites + '/' +
-                             pp.FollowedBy(no_whites + full_note)
-                             ).suppress() + no_whites) +
-                full_note + (pp.StringEnd() ^ cent)
-        ).setParseAction(note_parser_action).setResultsName('note_value')
+        self.frequency_parser = (
+                hertz + tok_end
+        ).setParseAction(lambda t: float(t[0])).setResultsName('frequency')
 
-        # parses a string like "440Hz" into a frequency value
-        self.hertz_parser = (
-                hertz + pp.StringEnd()
-        ).setParseAction(lambda t: t[0]).setResultsName('frequency')
+        self.base_freq_parser = (
+                full_note + pp.Literal('=').suppress() + hertz + tok_end
+        ).setParseAction(lambda t: t[1] * (1.0594630943592952645618252949463 ** -t[0])).setResultsName('base_freq')
 
         # parses a string like "sc -7:b" into a musical half tone step (using the MusicConverter.set method)
+        sign = (pp.Keyword('##') | pp.Keyword('bb') | pp.Keyword('#') | pp.Keyword('b') | pp.Keyword('n') | pp.Keyword(
+            '_'))
         self.score_parser = (
-            pp.Keyword('sc').suppress() + integer + pp.Literal(':').suppress() +
-            (
-                pp.Keyword('##') |
-                pp.Keyword('bb') |
-                pp.Keyword('_') |
-                pp.Keyword('#') |
-                pp.Keyword('b') |
-                pp.Keyword('n')
-            ) |
-            pp.Keyword('sc').suppress() + integer + pp.LineEnd()
+                integer + pp.Literal(':').suppress() + sign + tok_end
         ).setResultsName('notation')
 
-        # parse a string like "35%" into an amplitude value
-        self.amp_parser = (real + '%'
-                           ).setParseAction(lambda t: t[0] / 100.).setResultsName('amplitude')
+        # amplitude parser
+        self.amp_parser = (
+                real + pp.Literal('%').suppress() + tok_end
+        ).setParseAction(lambda t: float(t[0])).setResultsName('amplitude')
 
-        # parse a string like "-10dB" into an amplitude value
-        self.gain_parser = (may_sign + no_whites + real + no_whites + pp.Literal('dB').suppress()
-                            ).setParseAction(lambda t: 10. ** (t[0] * t[1] / 20.)).setResultsName('amplitude')
+        self.gain_parser = (
+                may_sign + real + pp.Literal('dB').suppress() + tok_end
+        ).setParseAction(lambda t: float(t[0] * t[1])).setResultsName('gain')
 
-        # assign a frequency to a specified note name: "A4=440Hz". Internally the frequency for A4 is calculated.
-        self.base_parser = (full_note + pp.Literal('=').suppress() + hertz
-                            ).setParseAction(lambda t: t[1] * (self.__root__ ** -t[0])).setResultsName('base_freq')
+        # clef parser
+        self.clef_parser = (
+                pp.Keyword('violin') | pp.Keyword('alto') | pp.Keyword('bass')
+        ).setResultsName('clef')
 
-        # all properties parser
-        # todo: not all properties are parsed, yet
-        self.input_parser = self.note_parser | \
-                            self.base_parser | \
-                            self.score_parser | \
+        # key parser
+        key_token = pp.NoMatch()
+        for key in self.keys:
+            key_token = key_token | pp.Keyword(key)
+
+        self.key_parser = (
+            key_token
+        ).setResultsName('key')
+
+        # complete parser
+        self.input_parser = self.note_name_parser | \
+                            self.frequency_parser | \
+                            self.base_freq_parser | \
                             self.amp_parser | \
-                            self.gain_parser
-                            # self.hertz_parser | \
+                            self.gain_parser | \
+                            self.clef_parser | \
+                            self.key_parser | \
+                            self.score_parser
 
         # *** initializations ***
         self.__note_value__ = 0.
@@ -147,19 +141,13 @@ class MusicConverter:
 
     @note_value.setter
     def note_value(self, new_val):
-        if isinstance(new_val, str):
-            try:
-                new_val = self.note_parser.parseString(new_val)[0]
-            except pp.ParseException as e:
-                raise MusicConverterError(f'Could not parse "{new_val}" @ col {e.col}!')
-
         if isinstance(new_val, (int, float)):
             if -58. <= new_val <= 66.:  # roughly corresponds to 16..20000Hz if A4=440Hz
                 self.__note_value__ = new_val
             else:
                 raise MusicConverterError(f'<note_value> out of audible range!')
         else:
-            raise TypeError('MusicConverter.note_value only accepts <str>, <float>, or <int>')
+            raise TypeError('MusicConverter.note_value only accepts <float> or <int>')
 
     # *** properties for conversion to the physical world ***
     @property
@@ -175,7 +163,7 @@ class MusicConverter:
     def frequency(self, new_freq):
         if isinstance(new_freq, str):
             try:
-                new_freq = self.hertz_parser.parseString(new_freq)[0]
+                new_freq = self.frequency_parser.parseString(new_freq)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_freq}" @ col {e.col}!')
         if isinstance(new_freq, (int, float)):
@@ -199,12 +187,12 @@ class MusicConverter:
     def base_freq(self, new_freq):
         if isinstance(new_freq, str):
             try:
-                new_freq = (self.base_parser ^ self.hertz_parser).parseString(new_freq)[0]
+                new_freq = self.base_freq_parser.parseString(new_freq)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_freq}" @ col {e.col}!')
         if isinstance(new_freq, (int, float)):
             if 16. <= new_freq <= 20000.:
-                self.__note_value__ = log10(new_freq / self.__base_freq__) / log10(self.__root__)
+                self.__base_freq__ = new_freq
             else:
                 raise MusicConverterError(f'<base_freq> out of audible range!')
         else:
@@ -249,11 +237,12 @@ class MusicConverter:
         """
         if isinstance(new_gain, str):
             try:
-                self.__amplitude__ = self.gain_parser.parseString(new_gain)[0]
+                new_gain = self.gain_parser.parseString(new_gain)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_gain}" @ col {e.col}!')
-        elif isinstance(new_gain, (int, float)):
-            if new_gain <= 0.:
+
+        if isinstance(new_gain, (int, float)):
+            if new_gain < 0.0 or new_gain == 0.0:
                 self.__amplitude__ = 10. ** (new_gain / 20.)
             else:
                 raise MusicConverterError(f'maximum <gain> is 0.0dB')
@@ -304,7 +293,7 @@ class MusicConverter:
         """
         if isinstance(new_name, str):
             try:
-                self.__note_value__ = self.note_parser.parseString(new_name)[0]
+                self.__note_value__ = self.note_name_parser.parseString(new_name)[0]
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_name}" @ col {e.col}!')
         else:
@@ -517,7 +506,7 @@ class MusicConverter:
         else:
             raise TypeError('MusicConverter.clef only accepts <str>')
 
-    def set(self, input):
+    def parse(self, input):
         """
         use the classes parsers to set the classes properties
         :param input:
@@ -585,18 +574,19 @@ if __name__ == '__main__':
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
 
-    input_string = ''
+    converter.key = 'C/a'
+    input_string = 'A4'
     while not input_string == 'quit':
-        input_string = input('>> ')
         try:
-            converter.set(input_string)
-            print(f'clef: {converter.clef}')
-            print(f'key: {converter.key}')
-            print(f'base_freq: {converter.base_freq:4.2f}Hz')
-            print(f'value: {converter.note_value}')
-            print(f'frequency: {converter.frequency:4.2f}Hz')
-            print(f'name: {converter.note_name}')
-            print(f'notation: {converter.notation}')
-
+            converter.parse(input_string)
         except Exception as err:
             print(f'{type(err).__name__}: {err}')
+        print(f'clef: {converter.clef}')
+        print(f'key: {converter.key}')
+        print(f'base_freq: {converter.base_freq:4.2f}Hz')
+        print(f'value: {converter.note_value}')
+        print(f'frequency: {converter.frequency:4.2f}Hz')
+        print(f'level: {converter.amplitude*100:3.1f}% / {converter.gain:3.1f}dB')
+        print(f'name: {converter.note_name}')
+        print(f'notation: {converter.notation}')
+        input_string = input('>> ')

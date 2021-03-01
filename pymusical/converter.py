@@ -39,7 +39,7 @@ class MusicConverter:
         # usually between -50 and +50, returns a number between -.5 and .5
         cent = (must_sign + no_whites + real + pp.StringEnd()).setParseAction(lambda t: t[0] * t[1] / 100)
 
-        # helpers for the note parser
+        # helpers for the note name parser
         note_name_offset = {
             'C': -9,
             'D': -7,
@@ -58,6 +58,8 @@ class MusicConverter:
         full_note = (note_name + no_whites + pp.Optional(pp.FollowedBy(flat_sharp) + flat_sharp)
                      + no_whites + pp.FollowedBy(octave) + octave
                      ).setParseAction(lambda t: sum(t))
+
+        hertz = (real + pp.Literal('Hz').suppress()).setParseAction(lambda t: t[0])
 
         # parse action for the note parser. checks if eg. "D#/Eb" contains the same note value twice and
         # returns the note value
@@ -81,69 +83,22 @@ class MusicConverter:
 
         # parses a string like "440Hz" into a frequency value
         self.hertz_parser = (
-                real + 'Hz'
+                hertz + pp.StringEnd()
         ).setParseAction(lambda t: t[0]).setResultsName('frequency')
 
-
-        # # parse action for score parser
-        # def score_parse_action(tokens):
-        #     position = tokens[0]
-        #
-        #     position -= self.clefs[self.clef]
-        #     octave_offset = position // 7
-        #     position = position % 7
-        #     used_values = [-9 + i for i in range(12) if not self.keys[self.key][1][i] == ' ']
-        #
-        #     if len(tokens) > 1:
-        #         if tokens[1] == 'b':
-        #             accidental_offset = -1
-        #         elif tokens[1] == '#':
-        #             accidental_offset = +1
-        #         elif tokens[1] == '##':
-        #             accidental_offset = 2
-        #         elif tokens[1] == 'bb':
-        #             accidental_offset = -2
-        #         elif tokens[1] in ['n', 'n#', 'nb']:
-        #             vorzeichen = self.keys[self.key][1].replace(' ', '')[position]
-        #             if vorzeichen not in '#b':
-        #                 raise MusicConverterError('natural sign not applicable!')
-        #             else:
-        #                 if vorzeichen == 'b':
-        #                     accidental_offset = 1
-        #                     if len(tokens[1]) > 1:
-        #                         if tokens[1][1] == '#':
-        #                             accidental_offset = 2
-        #                         else:
-        #                             raise MusicConverterError('natural flat sign not applicable')
-        #                 else:
-        #                     accidental_offset = -1
-        #                     if len(tokens[1]) > 1:
-        #                         if tokens[1][1] == 'b':
-        #                             accidental_offset = -2
-        #                         else:
-        #                             raise MusicConverterError('natural sharp sign not applicable')
-        #         else:
-        #             accidental_offset = 0
-        #     else:
-        #         accidental_offset = 0
-        #
-        #     return octave_offset * 12 + used_values[position] + accidental_offset
-        #
-        # parses a string like "sc -3:#" into a note value (musical half tone step)
+        # parses a string like "sc -7:b" into a musical half tone step (using the MusicConverter.set method)
         self.score_parser = (
             pp.Keyword('sc').suppress() + integer + pp.Literal(':').suppress() +
             (
                 pp.Keyword('##') |
                 pp.Keyword('bb') |
-                # pp.Keyword('n#') |
-                # pp.Keyword('nb') |
                 pp.Keyword('_') |
                 pp.Keyword('#') |
                 pp.Keyword('b') |
                 pp.Keyword('n')
             ) |
             pp.Keyword('sc').suppress() + integer + pp.LineEnd()
-        ).setResultsName('notation')  # .setParseAction(score_parse_action).setResultsName('note_value')
+        ).setResultsName('notation')
 
         # parse a string like "35%" into an amplitude value
         self.amp_parser = (real + '%'
@@ -154,17 +109,17 @@ class MusicConverter:
                             ).setParseAction(lambda t: 10. ** (t[0] * t[1] / 20.)).setResultsName('amplitude')
 
         # assign a frequency to a specified note name: "A4=440Hz". Internally the frequency for A4 is calculated.
-        self.base_parser = (full_note + pp.Literal('=').suppress() + self.hertz_parser
+        self.base_parser = (full_note + pp.Literal('=').suppress() + hertz
                             ).setParseAction(lambda t: t[1] * (self.__root__ ** -t[0])).setResultsName('base_freq')
 
         # all properties parser
         # todo: not all properties are parsed, yet
-        self.input_parser = self.note_parser ^ \
-                            self.hertz_parser ^ \
-                            self.score_parser ^ \
-                            self.base_parser ^ \
-                            self.amp_parser ^ \
+        self.input_parser = self.note_parser | \
+                            self.base_parser | \
+                            self.score_parser | \
+                            self.amp_parser | \
                             self.gain_parser
+                            # self.hertz_parser | \
 
         # *** initializations ***
         self.__note_value__ = 0.
@@ -584,18 +539,19 @@ if __name__ == '__main__':
     converter = MusicConverter()
     converter.clef = 'violin'
 
-    converter.key = 'G/e'
-    converter.note_value = 3
-
     values = []
     names = []
+    frequencies = []
     heads = {key: [] for key in converter.keys}
     recalc = {key: [] for key in converter.keys}
 
     for value in range(-10, 5):
         converter.note_value = value
-        values.append(f'{converter.note_value:11}')
-        names.append(f'{converter.note_name:11}')
+        values.append(f'{converter.note_value:6}     ')
+        name = converter.note_name
+        lead = (11 - len(name)) // 2
+        names.append(f'{" " * lead}{converter.note_name}{" " * (11 - len(name) - lead)}')
+        frequencies.append(f'{converter.frequency:7.1f}Hz  ')
         for key in converter.keys:
             converter.key = key
             heads[key].append(converter.notation)
@@ -621,11 +577,26 @@ if __name__ == '__main__':
     with open('overview.csv', 'w') as file:
         file.write(f'{converter.clef:7};' + ';'.join(values) + ';\n')
         file.write(f'{" ":7};' + ';'.join(names) + ';\n')
-        # file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
+        file.write(f'{" ":7};' + ';'.join(frequencies) + ';\n')
         for key in heads:
             vorzeichen = converter.keys[key][1][:].replace(' ', 'X')
             vorzeichen = vorzeichen[-1] + vorzeichen + vorzeichen[:2]
             file.write(f'{key:7};' + ';'.join(f'{c:11}' for c in vorzeichen) + ';\n')
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
             file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
-            # file.write(f'{"-" * 7};' + ';'.join([f'{"-" * 11}' for i in range(len(names))]) + ';\n')
+
+    input_string = ''
+    while not input_string == 'quit':
+        input_string = input('>> ')
+        try:
+            converter.set(input_string)
+            print(f'clef: {converter.clef}')
+            print(f'key: {converter.key}')
+            print(f'base_freq: {converter.base_freq:4.2f}Hz')
+            print(f'value: {converter.note_value}')
+            print(f'frequency: {converter.frequency:4.2f}Hz')
+            print(f'name: {converter.note_name}')
+            print(f'notation: {converter.notation}')
+
+        except Exception as err:
+            print(f'{type(err).__name__}: {err}')

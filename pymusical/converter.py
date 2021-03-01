@@ -414,7 +414,7 @@ class MusicConverter:
         signs = ['##', '#', 'n', '_', 'b', 'bb']
         if isinstance(new_score, str):
             try:
-                new_score = self.score_parser.parseString(new_score)[0]
+                new_score = tuple(self.score_parser.parseString(new_score))
             except pp.ParseException as e:
                 raise MusicConverterError(f'Could not parse "{new_score}" @ col {e.col}!')
         elif isinstance(new_score, list):

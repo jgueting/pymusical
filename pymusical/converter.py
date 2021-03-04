@@ -316,25 +316,21 @@ class MusicConverter:
 
     @property
     def key_name(self):
-        used_ivories = self.keys[self.key][1][:]
-        amendment = ''
-        note_octave_index = int(round(self.note_value) + 9)
-        if used_ivories[note_octave_index] == 'b':
-            note_octave_index += 1
-            amendment = 'b'
-        elif used_ivories[note_octave_index] == '#':
-            note_octave_index -= 1
-            amendment = '#'
-        else:
-            if self.__names__[note_octave_index] == ' ':
-                if 'b' in used_ivories:
-                    note_octave_index += 1
-                    amendment = 'b'
-                else:
-                    note_octave_index -= 1
-                    amendment = '#'
 
-        return f'{self.__names__[note_octave_index % 12]}{amendment}{self.octave}'
+        notation = self.notation
+        vorzeichen = self.keys[self.key][1].replace(' ', 'X')
+
+        key_type = vorzeichen.replace('_', '')
+        key_type = key_type[0] if key_type else 'X'
+
+        if (len(notation) > 1 and key_type == 'b') or (self.key == 'C/a' and self.note_value % 12 == 1):
+            head, acc = notation[1]
+        else:
+            head, acc = notation[0]
+
+        head = head - self.clefs[self.clef]
+
+        return f'{"CDEFGAB"[head % 7]}{vorzeichen[(int(self.note_value) - 3) % 12]}{acc}'
 
     @property
     def keys(self):
@@ -523,8 +519,7 @@ class MusicConverter:
             raise TypeError('MusicConverter.set() only accepts <str> as input')
 
 
-if __name__ == '__main__':
-
+def test_csv():
     converter = MusicConverter()
     converter.clef = 'violin'
 
@@ -533,6 +528,7 @@ if __name__ == '__main__':
     frequencies = []
     heads = {key: [] for key in converter.keys}
     recalc = {key: [] for key in converter.keys}
+    key_names = {key: [] for key in converter.keys}
 
     for value in range(-10, 5):
         converter.note_value = value
@@ -544,6 +540,7 @@ if __name__ == '__main__':
         for key in converter.keys:
             converter.key = key
             heads[key].append(converter.notation)
+            key_names[key].append(converter.key_name)
 
     for key in heads:
         converter.key = key
@@ -562,7 +559,6 @@ if __name__ == '__main__':
                     note_values.append((-111, '$'))
             recalc[key].append(note_values)
 
-
     with open('overview.csv', 'w') as file:
         file.write(f'{converter.clef:7};' + ';'.join(values) + ';\n')
         file.write(f'{" ":7};' + ';'.join(names) + ';\n')
@@ -571,11 +567,19 @@ if __name__ == '__main__':
             vorzeichen = converter.keys[key][1][:].replace(' ', 'X')
             vorzeichen = vorzeichen[-1] + vorzeichen + vorzeichen[:2]
             file.write(f'{key:7};' + ';'.join(f'{c:11}' for c in vorzeichen) + ';\n')
-            file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
-            file.write(f'{" ":7};' + ';'.join(f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
+            file.write(f'{" ":7};' + ';'.join(
+                f'{"/".join([f"{head:2}:{acc:2}" for head, acc in notation]):11}' for notation in heads[key]) + ';\n')
+            file.write(f'{" ":7};' + ';'.join(
+                f'{"/".join([f"{value:4}{err}" for value, err in calc]):11}' for calc in recalc[key]) + ';\n')
+            file.write(f'{" ":7};' + ';'.join(f'{name:11}' for name in key_names[key]) + ';\n')
 
+
+def parser_test():
+    converter = MusicConverter()
+    converter.clef = 'violin'
     converter.key = 'C/a'
     input_string = 'A4'
+
     while not input_string == 'quit':
         try:
             converter.parse(input_string)
@@ -587,6 +591,12 @@ if __name__ == '__main__':
         print(f'value: {converter.note_value}')
         print(f'frequency: {converter.frequency:4.2f}Hz')
         print(f'level: {converter.amplitude*100:3.1f}% / {converter.gain:3.1f}dB')
-        print(f'name: {converter.note_name}')
+        print(f'name: {converter.key_name}')
         print(f'notation: {converter.notation}')
         input_string = input('>> ')
+
+    print('terminated.')
+
+
+if __name__ == '__main__':
+    test_csv()

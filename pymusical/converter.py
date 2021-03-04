@@ -318,19 +318,23 @@ class MusicConverter:
     def key_name(self):
 
         notation = self.notation
-        vorzeichen = self.keys[self.key][1].replace(' ', 'X')
+        vorzeichen = self.keys[self.key][1]
 
-        key_type = vorzeichen.replace('_', '')
+        key_type = vorzeichen.replace(' ', '').replace('_', '')
         key_type = key_type[0] if key_type else 'X'
 
-        if (len(notation) > 1 and key_type == 'b') or (self.key == 'C/a' and self.note_value % 12 == 1):
+        if (len(notation) > 1 and key_type == 'b') or (key_type == 'X' and self.note_value % 12 == 1):
             head, acc = notation[1]
         else:
             head, acc = notation[0]
 
+        print(f'key: {self.key}; vorzeichen: {vorzeichen}; type: {key_type}')
+
         head = head - self.clefs[self.clef]
 
-        return f'{"CDEFGAB"[head % 7]}{vorzeichen[(int(self.note_value) - 3) % 12]}{acc}'
+        name = f'{"CDEFGAB"[head % 7]}{vorzeichen[(int(self.note_value) - 3) % 12]}{acc}'
+
+        return name.replace(' ', '').replace('_', '').replace('n', '')
 
     @property
     def keys(self):
